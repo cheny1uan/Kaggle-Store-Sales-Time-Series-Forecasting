@@ -1,0 +1,11 @@
+# Raw competition data
+data/*.csv
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+
+# Outputs
+outputs/
+submissions/
