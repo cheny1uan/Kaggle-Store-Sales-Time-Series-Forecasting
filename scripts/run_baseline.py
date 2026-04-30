@@ -61,6 +61,8 @@ FEATURE_DROP_LIST = {
     "holiday_cnt",
 }
 
+ZERO_KEY_COLS = ["store_nbr", "family"]
+
 
 def build_dataset(
     base_df: pd.DataFrame,
@@ -160,6 +162,28 @@ def save_feature_importance(model, feature_cols: list[str], out_path: Path) -> p
     return fi
 
 
+def build_zero_set(train_df: pd.DataFrame) -> pd.MultiIndex:
+    zero_pairs = (
+        train_df.groupby(ZERO_KEY_COLS)["sales"]
+        .sum()
+        .reset_index()
+    )
+    zero_pairs = zero_pairs[zero_pairs["sales"] == 0][ZERO_KEY_COLS]
+    return pd.MultiIndex.from_frame(zero_pairs)
+
+
+def apply_zero_forecast(pred_df: pd.DataFrame, zero_set: pd.MultiIndex) -> np.ndarray:
+    out = pred_df.copy()
+    pair_index = pd.MultiIndex.from_frame(out[ZERO_KEY_COLS])
+    zero_mask = pair_index.isin(zero_set)
+    if "onpromotion" in out.columns:
+        zero_mask = zero_mask & (out["onpromotion"].fillna(0).astype(float) <= 0)
+    preds = out["pred"].to_numpy(copy=True)
+    preds[zero_mask] = 0.0
+    print(f"Zero forecasting overrides: {int(zero_mask.sum()):,} rows")
+    return preds
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -196,6 +220,8 @@ def main():
     test_feat = add_time_series_features(test_feat, history_df=test_history)
     train_feat, valid_feat, test_feat, feature_cols, removed = align_feature_frames(train_feat, valid_feat, test_feat)
     print(f"Dropped low-importance features: {removed}")
+    zero_set = build_zero_set(train_part if args.mode == "fast" else train_raw)
+    print(f"Zero-sales store-family pairs: {len(zero_set):,}")
 
     model, val_score, cat_cols = train_lgbm(
         train_feat,
@@ -226,6 +252,7 @@ def main():
         final_model, _ = fit_final_lgbm(full_train_feat, feature_cols, n_estimators=model.best_iteration_ or cfg["n_estimators"])
         save_feature_importance(final_model, feature_cols, OUTPUT_DIR / "feature_importance_full_final.csv")
         preds = np.expm1(final_model.predict(final_test_feat[feature_cols]))
+        pred_source = final_test_feat
     else:
         X_test = test_feat[feature_cols].copy()
         X_train = train_feat[feature_cols].copy()
@@ -233,7 +260,11 @@ def main():
         train_feat[feature_cols] = X_train
         test_feat[feature_cols] = X_test
         preds = np.expm1(model.predict(test_feat[feature_cols], num_iteration=model.best_iteration_))
+        pred_source = test_feat
 
+    pred_frame = pred_source[ZERO_KEY_COLS + ["onpromotion"]].copy()
+    pred_frame["pred"] = preds
+    preds = apply_zero_forecast(pred_frame, zero_set)
     preds = pd.Series(preds).clip(lower=0)
     submission = frames["sample_submission"].copy()
     submission["sales"] = preds.values

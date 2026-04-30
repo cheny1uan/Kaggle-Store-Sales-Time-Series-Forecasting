@@ -62,10 +62,13 @@ def build_oil_features(oil: pd.DataFrame) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"])
     full_dates = pd.DataFrame({"date": pd.date_range(df["date"].min(), df["date"].max(), freq="D")})
     df = full_dates.merge(df, on="date", how="left")
-    df["dcoilwtico"] = df["dcoilwtico"].interpolate(limit_direction="both")
+    df["dcoilwtico_raw"] = df["dcoilwtico"]
+    df["oil_missing"] = df["dcoilwtico"].isna().astype("int8")
+    df["dcoilwtico"] = df["dcoilwtico"].interpolate(method="linear", limit_direction="both")
     df["dcoilwtico"] = df["dcoilwtico"].ffill().bfill()
     df["oil_diff_1"] = df["dcoilwtico"].diff().fillna(0)
     df["oil_pct_change_1"] = df["dcoilwtico"].pct_change().replace([float("inf"), float("-inf")], 0).fillna(0)
+    df["expensive_oil"] = (df["dcoilwtico"] >= 60).astype("int8")
     return df
 
 
@@ -88,4 +91,3 @@ def merge_features(
     out = out.merge(transactions, on=["date", "store_nbr"], how="left")
     out["transactions"] = out["transactions"].fillna(0)
     return out
-
