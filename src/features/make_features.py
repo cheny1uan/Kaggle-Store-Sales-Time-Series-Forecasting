@@ -56,6 +56,11 @@ def build_target_aggregates(train_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "store_nbr__family": ["store_nbr", "family"],
         "family__dayofweek": ["family", "dayofweek"],
         "store_nbr__dayofweek": ["store_nbr", "dayofweek"],
+        "type": ["type"],
+        "city": ["city"],
+        "state": ["state"],
+        "family__month": ["family", "month"],
+        "store_nbr__month": ["store_nbr", "month"],
     }
     mappings: dict[str, pd.DataFrame] = {}
     for name, cols in agg_specs.items():

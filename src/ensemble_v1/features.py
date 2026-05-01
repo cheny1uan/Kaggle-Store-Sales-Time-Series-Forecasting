@@ -41,7 +41,11 @@ def add_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_dataset(base_df: pd.DataFrame, frames: dict[str, pd.DataFrame], agg_source_df: pd.DataFrame) -> pd.DataFrame:
+def build_dataset(
+    base_df: pd.DataFrame,
+    frames: dict[str, pd.DataFrame],
+    agg_source_df: pd.DataFrame,
+) -> pd.DataFrame:
     base = merge_features(
         base=base_df,
         stores=frames["stores"],
@@ -89,8 +93,14 @@ def align_feature_frames(
     feature_drop: set[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], list[str]]:
     all_feature_cols = get_feature_columns(train_feat)
-    feature_cols = [c for c in all_feature_cols if c not in feature_drop]
-    removed_cols = [c for c in all_feature_cols if c in feature_drop]
+    feature_cols = [
+        c for c in all_feature_cols
+        if c not in feature_drop and not c.startswith("transactions")
+    ]
+    removed_cols = [
+        c for c in all_feature_cols
+        if c in feature_drop or c.startswith("transactions")
+    ]
 
     train_feat = train_feat.reindex(columns=["date", "sales"] + feature_cols, fill_value=0)
     valid_feat = valid_feat.reindex(columns=["date", "sales"] + feature_cols, fill_value=0)
@@ -114,4 +124,3 @@ def apply_zero_forecast(pred_df: pd.DataFrame, zero_set: pd.MultiIndex) -> np.nd
     preds[zero_mask] = 0.0
     print(f"Zero forecasting overrides: {int(zero_mask.sum()):,} rows")
     return preds
-
