@@ -17,6 +17,32 @@ def add_date_features(df: pd.DataFrame) -> pd.DataFrame:
     out["is_month_start"] = out["date"].dt.is_month_start.astype("int8")
     out["is_month_end"] = out["date"].dt.is_month_end.astype("int8")
     out["is_weekend"] = out["dayofweek"].isin([5, 6]).astype("int8")
+    days_in_month = out["date"].dt.days_in_month.astype("int16")
+    day = out["day"].astype("int16")
+    out["is_payday"] = ((day == 15) | (day == days_in_month)).astype("int8")
+    out["days_to_next_payday"] = np.where(
+        day == 15,
+        0,
+        np.where(
+            day == days_in_month,
+            0,
+            np.where(day < 15, np.minimum(15 - day, days_in_month - day), days_in_month - day),
+        ),
+    ).astype("int8")
+    out["days_since_prev_payday"] = np.where(
+        day == days_in_month,
+        0,
+        np.where(day >= 15, day - 15, day),
+    ).astype("int8")
+    out["payday_window_3"] = (
+        (out["days_to_next_payday"] <= 3) | (out["days_since_prev_payday"] <= 3)
+    ).astype("int8")
+    earthquake_date = pd.Timestamp("2016-04-16")
+    delta_days = (out["date"] - earthquake_date).dt.days
+    out["is_earthquake_day"] = (delta_days == 0).astype("int8")
+    out["earthquake_window_7"] = (delta_days.between(0, 7)).astype("int8")
+    out["earthquake_window_30"] = (delta_days.between(0, 30)).astype("int8")
+    out["earthquake_post_impact"] = (delta_days.between(0, 21)).astype("int8")
     angle = 2 * np.pi * out["dayofyear"] / 365.25
     out["doy_sin"] = np.sin(angle).astype("float32")
     out["doy_cos"] = np.cos(angle).astype("float32")
@@ -30,6 +56,11 @@ def build_target_aggregates(train_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "store_nbr__family": ["store_nbr", "family"],
         "family__dayofweek": ["family", "dayofweek"],
         "store_nbr__dayofweek": ["store_nbr", "dayofweek"],
+        "type": ["type"],
+        "city": ["city"],
+        "state": ["state"],
+        "family__month": ["family", "month"],
+        "store_nbr__month": ["store_nbr", "month"],
     }
     mappings: dict[str, pd.DataFrame] = {}
     for name, cols in agg_specs.items():
