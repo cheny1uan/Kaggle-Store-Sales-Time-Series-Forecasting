@@ -5,6 +5,32 @@ data/*.csv
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints/
 
 # Outputs
 outputs/
