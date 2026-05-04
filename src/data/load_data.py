@@ -78,13 +78,14 @@ def merge_features(
     oil: pd.DataFrame,
     holidays: pd.DataFrame,
     transactions: pd.DataFrame,
+    transactions_override: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     out = base.copy()
     out["date"] = pd.to_datetime(out["date"])
     stores = stores.copy()
     oil = build_oil_features(oil)
     holidays = build_holiday_features(holidays)
-    transactions = build_transaction_features(transactions)
+    transactions = build_transaction_features(transactions_override if transactions_override is not None else transactions)
     out = out.merge(stores, on="store_nbr", how="left")
     out = out.merge(oil, on="date", how="left")
     out = out.merge(holidays, on="date", how="left")
