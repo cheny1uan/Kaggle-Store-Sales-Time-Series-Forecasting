@@ -5,3 +5,7 @@ lightgbm
 xgboost
 torch
 transformers
+pypdf
+pytorch-lightning
+pytorch-forecasting
+lightning

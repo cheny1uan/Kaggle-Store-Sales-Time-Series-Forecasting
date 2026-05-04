@@ -23,6 +23,7 @@ env/
 # IDE / Editor
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
@@ -35,3 +36,25 @@ Thumbs.db
 # Outputs
 outputs/
 submissions/
+
+# Model weights / checkpoints
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+
+# Logs and temporary artifacts
+*.log
+*.tmp
+*.temp
+*.npy
+*.npz
+lightning_logs/
+
+# Generated TFT artifacts
+src-TFT/checkpoints*/
+src-TFT/submission*.csv
+src-TFT/data/*.csv
+src-TFT/features/*.csv
