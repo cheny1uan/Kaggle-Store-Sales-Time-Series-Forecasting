@@ -2,29 +2,35 @@
 
 ## Current Best Result
 
-| File | Public Score | Rank | Note |
-|---|---:|---:|---|
-| `submissions/v4_logblend_55since_45full.csv` | **0.40387** | **100** | Final submission |
-| `submissions/ensemble_v4_since2015.csv` | 0.38540 | - | Best single v4 window model on local validation |
-| `submissions/ensemble_v4_full.csv` | 0.38599 | - | Full-history backup |
+| File | Public Score | Note |
+|---|---:|---|
+| `submissions/final_submission.csv` | **0.39969** | Final submission |
 
-## Current Advice
+## Historical Anchor
 
-If you need a safe submission, use:
+| File | Public Score | Note |
+|---|---:|---|
+| `submissions/blend_anchor.csv` | 0.40387 | Best result before the final blend |
 
-```text
-submissions/v4_logblend_55since_45full.csv
+## Reference Candidate
+
+| File | Note |
+|---|---|
+| `submissions/reference_submission.csv` | Complementary reference used for the final log-space blend |
+
+## Reproduce the Final File
+
+```powershell
+python scripts/blend_submissions.py `
+  --base submissions/blend_anchor.csv `
+  --plus submissions/reference_submission.csv `
+  --weights 0.08 `
+  --methods log `
+  --output submissions/final_submission.csv
 ```
 
-If you want a conservative backup, use:
+## Why This Blend Was Kept
 
-```text
-submissions/ensemble_v4_since2015.csv
-```
-
-## Why This Is the Final Choice
-
-- `v4_since2015` captures the more recent distribution.
-- `v4_full` keeps longer historical context.
-- A log-space blend is more aligned with the RMSLE metric than a raw linear average.
-
+- It keeps the strongest anchor result intact.
+- It adds a small complementary correction in log space.
+- It stays stable under RMSLE and does not overreact to outliers.

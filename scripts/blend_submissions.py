@@ -79,14 +79,19 @@ def blend_pair(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default="submissions/ensemble_v2_full.csv")
-    parser.add_argument("--plus", default="submissions/ensemble_v2_plus_full.csv")
+    parser.add_argument("--base", default="submissions/blend_anchor.csv")
+    parser.add_argument("--plus", default="submissions/reference_submission.csv")
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional explicit output path for a single blend result.",
+    )
     parser.add_argument(
         "--weights",
         nargs="+",
         type=float,
         default=[0.55, 0.60, 0.62, 0.65, 0.68, 0.70, 0.72, 0.75, 0.78, 0.80],
-        help="Weights assigned to ensemble_v2_plus; base weight is 1 - weight.",
+        help="Weights assigned to the --plus submission; base weight is 1 - weight.",
     )
     parser.add_argument(
         "--methods",
@@ -98,6 +103,24 @@ def main():
 
     base_path = ROOT / args.base
     plus_path = ROOT / args.plus
+    if args.output is not None:
+        if len(args.weights) != 1 or len(args.methods) != 1:
+            raise ValueError("--output can only be used with exactly one weight and one method.")
+        weight = args.weights[0]
+        method = args.methods[0]
+        output_path = Path(args.output)
+        if not output_path.is_absolute():
+            output_path = ROOT / output_path
+        stats = blend_pair(base_path, plus_path, weight, output_path, method=method)
+        print(
+            f"saved {output_path.name}: "
+            f"rows={int(stats['rows'])}, "
+            f"min={stats['min_sales']:.4f}, "
+            f"max={stats['max_sales']:.4f}, "
+            f"mean={stats['mean_sales']:.4f}"
+        )
+        return
+
     for method in args.methods:
         for weight in args.weights:
             plus_pct, base_pct = _weight_label(weight)

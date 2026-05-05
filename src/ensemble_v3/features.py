@@ -15,11 +15,15 @@ from src.models.train_lgbm import get_feature_columns
 
 ZERO_KEY_COLS = ["store_nbr", "family"]
 LONG_SALES_LAGS = [1, 7, 14, 28, 56, 91, 182, 364, 365, 728]
+REFERENCE_SALES_LAGS = [1, 7, 14, 28, 56, 91, 182, 364, 365, 728, 1095]
 BASE_SALES_LAGS = [1, 7, 14, 28]
 SALES_WINDOWS = [7, 28]
 LONG_SALES_WINDOWS = [7, 28, 56]
 TRANSACTION_LAGS = [1, 7, 14, 28]
+REFERENCE_TRANSACTION_LAGS = [1, 7, 14, 16, 17, 18, 19, 20, 21, 22, 28]
 TRANSACTION_WINDOWS = [7, 28]
+PROMOTION_LAGS = [1, 7]
+PROMOTION_WINDOWS = [7, 28]
 
 
 def prepare_time_split(train_raw: pd.DataFrame, valid_days: int, history_days: int | None) -> tuple[pd.DataFrame, pd.DataFrame, pd.Timestamp]:
@@ -215,14 +219,29 @@ def add_sales_time_series_features(
     target_df: pd.DataFrame,
     history_df: pd.DataFrame | None = None,
     use_long_lags: bool = False,
+    use_reference_features: bool = False,
 ) -> pd.DataFrame:
     sales_history = None
     transactions_history = None
+    promotion_history = None
     if history_df is not None:
         sales_cols = [c for c in ["date", "store_nbr", "family", "sales"] if c in history_df.columns]
         transactions_cols = [c for c in ["date", "store_nbr", "transactions"] if c in history_df.columns]
+        promotion_cols = [c for c in ["date", "store_nbr", "family", "onpromotion"] if c in history_df.columns]
         sales_history = history_df[sales_cols].copy() if sales_cols else None
         transactions_history = history_df[transactions_cols].copy() if transactions_cols else None
+        promotion_history = history_df[promotion_cols].copy() if promotion_cols else None
+
+    sales_lags = BASE_SALES_LAGS
+    sales_windows = SALES_WINDOWS
+    transaction_lags = TRANSACTION_LAGS
+    if use_reference_features:
+        sales_lags = REFERENCE_SALES_LAGS
+        sales_windows = LONG_SALES_WINDOWS
+        transaction_lags = REFERENCE_TRANSACTION_LAGS
+    elif use_long_lags:
+        sales_lags = LONG_SALES_LAGS
+        sales_windows = LONG_SALES_WINDOWS
 
     out = add_lag_rolling_features(
         target_df,
@@ -230,8 +249,8 @@ def add_sales_time_series_features(
         group_cols=["store_nbr", "family"],
         value_col="sales",
         feature_prefix="sales",
-        lags=LONG_SALES_LAGS if use_long_lags else BASE_SALES_LAGS,
-        windows=LONG_SALES_WINDOWS if use_long_lags else SALES_WINDOWS,
+        lags=sales_lags,
+        windows=sales_windows,
     )
     out = add_lag_rolling_features(
         out,
@@ -239,9 +258,19 @@ def add_sales_time_series_features(
         group_cols=["store_nbr"],
         value_col="transactions",
         feature_prefix="transactions",
-        lags=TRANSACTION_LAGS,
+        lags=transaction_lags,
         windows=TRANSACTION_WINDOWS,
     )
+    if use_reference_features:
+        out = add_lag_rolling_features(
+            out,
+            history_df=promotion_history,
+            group_cols=["store_nbr", "family"],
+            value_col="onpromotion",
+            feature_prefix="promotion",
+            lags=PROMOTION_LAGS,
+            windows=PROMOTION_WINDOWS,
+        )
     return out
 
 
@@ -277,6 +306,20 @@ def align_feature_frames(
 
 def build_zero_set(train_df: pd.DataFrame) -> pd.MultiIndex:
     zero_pairs = train_df.groupby(ZERO_KEY_COLS)["sales"].sum().reset_index()
+    zero_pairs = zero_pairs[zero_pairs["sales"] == 0][ZERO_KEY_COLS]
+    return pd.MultiIndex.from_frame(zero_pairs)
+
+
+def build_recent_zero_set(train_df: pd.DataFrame, recent_days: int = 21) -> pd.MultiIndex:
+    if train_df.empty:
+        return pd.MultiIndex.from_frame(pd.DataFrame(columns=ZERO_KEY_COLS))
+
+    work = train_df.copy()
+    work["date"] = pd.to_datetime(work["date"])
+    anchor_date = work["date"].max()
+    start_date = anchor_date - pd.Timedelta(days=recent_days - 1)
+    recent = work[work["date"] >= start_date].copy()
+    zero_pairs = recent.groupby(ZERO_KEY_COLS)["sales"].sum().reset_index()
     zero_pairs = zero_pairs[zero_pairs["sales"] == 0][ZERO_KEY_COLS]
     return pd.MultiIndex.from_frame(zero_pairs)
 

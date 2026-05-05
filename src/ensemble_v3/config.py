@@ -19,6 +19,8 @@ class ModeConfig:
     tx_lgb_seeds: tuple[int, ...]
     tx_xgb_seed: int
     use_long_lags: bool = False
+    use_reference_features: bool = False
+    zero_recent_days: int | None = None
 
 
 MODES: dict[str, ModeConfig] = {
@@ -114,6 +116,60 @@ MODES: dict[str, ModeConfig] = {
         tx_lgb_seeds=(),
         tx_xgb_seed=44,
         use_long_lags=True,
+    ),
+    "v5_fast": ModeConfig(
+        history_days=1260,
+        valid_days=7,
+        sales_estimators=1400,
+        sales_xgb_estimators=1000,
+        tx_estimators=900,
+        tx_xgb_estimators=900,
+        early_stopping=80,
+        full_retrain=False,
+        output_name="ensemble_v5_fast.csv",
+        lgb_seeds=(42, 2026),
+        xgb_seed=43,
+        tx_lgb_seeds=(42,),
+        tx_xgb_seed=44,
+        use_long_lags=True,
+        use_reference_features=True,
+        zero_recent_days=21,
+    ),
+    "v5_full": ModeConfig(
+        history_days=None,
+        valid_days=28,
+        sales_estimators=4200,
+        sales_xgb_estimators=1400,
+        tx_estimators=1800,
+        tx_xgb_estimators=1200,
+        early_stopping=120,
+        full_retrain=True,
+        output_name="ensemble_v5_full.csv",
+        lgb_seeds=(42, 2026),
+        xgb_seed=43,
+        tx_lgb_seeds=(),
+        tx_xgb_seed=44,
+        use_long_lags=True,
+        use_reference_features=True,
+        zero_recent_days=21,
+    ),
+    "v5_since2015": ModeConfig(
+        history_days=1260,
+        valid_days=28,
+        sales_estimators=3600,
+        sales_xgb_estimators=1400,
+        tx_estimators=1500,
+        tx_xgb_estimators=1100,
+        early_stopping=120,
+        full_retrain=True,
+        output_name="ensemble_v5_since2015.csv",
+        lgb_seeds=(42, 2026),
+        xgb_seed=43,
+        tx_lgb_seeds=(),
+        tx_xgb_seed=44,
+        use_long_lags=True,
+        use_reference_features=True,
+        zero_recent_days=21,
     ),
 }
 

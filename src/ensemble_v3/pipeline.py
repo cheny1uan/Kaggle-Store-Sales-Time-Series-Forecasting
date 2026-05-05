@@ -19,6 +19,7 @@ from src.ensemble_v3.features import (
     build_sales_dataset,
     build_transaction_aggregates,
     build_transaction_base_features,
+    build_recent_zero_set,
     build_zero_set,
     prepare_time_split,
 )
@@ -60,14 +61,30 @@ def _build_sales_feature_sets(
     valid_tx_override: pd.DataFrame | None = None,
     test_tx_override: pd.DataFrame | None = None,
     use_long_lags: bool = False,
+    use_reference_features: bool = False,
 ):
     train_feat = build_sales_dataset(train_part, frames, agg_source)
     valid_feat = build_sales_dataset(valid_part, frames, agg_source, transactions_override=valid_tx_override)
     test_feat = build_sales_dataset(test_raw, frames, agg_source, transactions_override=test_tx_override)
-    train_feat = add_sales_time_series_features(train_feat, use_long_lags=use_long_lags)
-    valid_feat = add_sales_time_series_features(valid_feat, history_df=train_feat, use_long_lags=use_long_lags)
-    test_history = train_feat[["date", "store_nbr", "family", "sales", "transactions"]].copy()
-    test_feat = add_sales_time_series_features(test_feat, history_df=test_history, use_long_lags=use_long_lags)
+    train_feat = add_sales_time_series_features(
+        train_feat,
+        use_long_lags=use_long_lags,
+        use_reference_features=use_reference_features,
+    )
+    valid_feat = add_sales_time_series_features(
+        valid_feat,
+        history_df=train_feat,
+        use_long_lags=use_long_lags,
+        use_reference_features=use_reference_features,
+    )
+    test_history_cols = [c for c in ["date", "store_nbr", "family", "sales", "transactions", "onpromotion"] if c in train_feat.columns]
+    test_history = train_feat[test_history_cols].copy()
+    test_feat = add_sales_time_series_features(
+        test_feat,
+        history_df=test_history,
+        use_long_lags=use_long_lags,
+        use_reference_features=use_reference_features,
+    )
     return align_feature_frames(train_feat, valid_feat, test_feat, feature_drop)
 
 
@@ -156,17 +173,24 @@ def recursive_sales_forecast(
     zero_set,
     tx_pred_df: pd.DataFrame,
     use_long_lags: bool = False,
+    use_reference_features: bool = False,
 ) -> pd.DataFrame:
     base = build_sales_dataset(base_df, frames, agg_source, transactions_override=tx_pred_df)
-    history = history_df[["date", "store_nbr", "family", "sales", "transactions"]].copy()
+    history_cols = [c for c in ["date", "store_nbr", "family", "sales", "transactions", "onpromotion"] if c in history_df.columns]
+    history = history_df[history_cols].copy()
     history["date"] = pd.to_datetime(history["date"])
     frames_out: list[pd.DataFrame] = []
-    max_lookback = 760 if use_long_lags else 70
+    max_lookback = 1120 if use_reference_features else (760 if use_long_lags else 70)
 
     for current_date in sorted(pd.to_datetime(base["date"]).unique()):
         day_base = base[base["date"] == current_date].copy()
         recent_history = history[history["date"] >= pd.Timestamp(current_date) - pd.Timedelta(days=max_lookback)].copy()
-        day_feat = add_sales_time_series_features(day_base, history_df=recent_history, use_long_lags=use_long_lags)
+        day_feat = add_sales_time_series_features(
+            day_base,
+            history_df=recent_history,
+            use_long_lags=use_long_lags,
+            use_reference_features=use_reference_features,
+        )
         day_feat = day_feat.reindex(columns=["date", "id"] + feature_cols, fill_value=0)
 
         day_predictions = {}
@@ -188,7 +212,7 @@ def recursive_sales_forecast(
         day_out["pred"] = day_pred
         frames_out.append(day_out)
 
-        history_update = day_out[["date", "store_nbr", "family", "transactions"]].copy()
+        history_update = day_out[["date", "store_nbr", "family", "transactions", "onpromotion"]].copy()
         history_update["sales"] = day_pred
         history = pd.concat([history, history_update], ignore_index=True, sort=False)
 
@@ -516,6 +540,7 @@ def run(mode: str = "fast") -> dict[str, object]:
         config.feature_drop,
         valid_tx_override=tx_valid_pred_df,
         use_long_lags=mode_cfg.use_long_lags,
+        use_reference_features=mode_cfg.use_reference_features,
     )
     print(f"Sales features dropped: {sales_removed_cols}")
 
@@ -555,6 +580,8 @@ def run(mode: str = "fast") -> dict[str, object]:
     print(f"Sales XGBoost seed {mode_cfg.xgb_seed} validation RMSLE: {sales_xgb_score:.5f}")
 
     zero_set = build_zero_set(train_part)
+    if mode_cfg.zero_recent_days is not None:
+        zero_set = zero_set.union(build_recent_zero_set(train_part, mode_cfg.zero_recent_days))
     print(f"Zero-sales store-family pairs: {len(zero_set):,}")
 
     sales_recursive_scores: dict[str, float] = {}
@@ -575,6 +602,7 @@ def run(mode: str = "fast") -> dict[str, object]:
             zero_set=zero_set,
             tx_pred_df=tx_valid_pred_df,
             use_long_lags=mode_cfg.use_long_lags,
+            use_reference_features=mode_cfg.use_reference_features,
         )
         sales_recursive_pred_dfs[name] = pred_df
         eval_df = valid_part[["id", "sales"]].merge(pred_df[["id", "pred"]], on="id", how="left")
@@ -604,6 +632,7 @@ def run(mode: str = "fast") -> dict[str, object]:
         zero_set=zero_set,
         tx_pred_df=tx_valid_pred_df,
         use_long_lags=mode_cfg.use_long_lags,
+        use_reference_features=mode_cfg.use_reference_features,
     )
     valid_eval = valid_part[["id", "sales"]].merge(valid_pred_df[["id", "pred"]], on="id", how="left")
     blend_score = rmsle(valid_eval["sales"].values, valid_eval["pred"].fillna(0).values)
@@ -672,7 +701,11 @@ def run(mode: str = "fast") -> dict[str, object]:
             )
         )
         full_sales_train_feat = build_sales_dataset(final_train_raw, frames, full_sales_agg_source)
-        full_sales_train_feat = add_sales_time_series_features(full_sales_train_feat, use_long_lags=mode_cfg.use_long_lags)
+        full_sales_train_feat = add_sales_time_series_features(
+            full_sales_train_feat,
+            use_long_lags=mode_cfg.use_long_lags,
+            use_reference_features=mode_cfg.use_reference_features,
+        )
         full_sales_train_feat = full_sales_train_feat.reindex(columns=["date", "sales"] + sales_feature_cols, fill_value=0)
 
         final_sales_models: dict[str, object] = {}
@@ -707,9 +740,14 @@ def run(mode: str = "fast") -> dict[str, object]:
             models=final_sales_models,
             model_types=final_sales_model_types,
             weights=sales_weights,
-            zero_set=build_zero_set(train_raw),
+            zero_set=(
+                build_zero_set(train_raw).union(build_recent_zero_set(train_raw, mode_cfg.zero_recent_days))
+                if mode_cfg.zero_recent_days is not None
+                else build_zero_set(train_raw)
+            ),
             tx_pred_df=tx_test_pred_df,
             use_long_lags=mode_cfg.use_long_lags,
+            use_reference_features=mode_cfg.use_reference_features,
         )
     else:
         test_tx_pred_df = recursive_transactions_forecast(
@@ -736,6 +774,7 @@ def run(mode: str = "fast") -> dict[str, object]:
             zero_set=zero_set,
             tx_pred_df=test_tx_pred_df,
             use_long_lags=mode_cfg.use_long_lags,
+            use_reference_features=mode_cfg.use_reference_features,
         )
 
     calibration = postprocess["calibration"]
