@@ -66,6 +66,8 @@ def build_oil_features(oil: pd.DataFrame) -> pd.DataFrame:
     df["oil_missing"] = df["dcoilwtico"].isna().astype("int8")
     df["dcoilwtico"] = df["dcoilwtico"].interpolate(method="linear", limit_direction="both")
     df["dcoilwtico"] = df["dcoilwtico"].ffill().bfill()
+    df["oil_ma_7"] = df["dcoilwtico"].rolling(window=7, min_periods=1).mean()
+    df["oil_ma_28"] = df["dcoilwtico"].rolling(window=28, min_periods=1).mean()
     df["oil_diff_1"] = df["dcoilwtico"].diff().fillna(0)
     df["oil_pct_change_1"] = df["dcoilwtico"].pct_change().replace([float("inf"), float("-inf")], 0).fillna(0)
     df["expensive_oil"] = (df["dcoilwtico"] >= 60).astype("int8")
@@ -78,13 +80,14 @@ def merge_features(
     oil: pd.DataFrame,
     holidays: pd.DataFrame,
     transactions: pd.DataFrame,
+    transactions_override: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     out = base.copy()
     out["date"] = pd.to_datetime(out["date"])
     stores = stores.copy()
     oil = build_oil_features(oil)
     holidays = build_holiday_features(holidays)
-    transactions = build_transaction_features(transactions)
+    transactions = build_transaction_features(transactions_override if transactions_override is not None else transactions)
     out = out.merge(stores, on="store_nbr", how="left")
     out = out.merge(oil, on="date", how="left")
     out = out.merge(holidays, on="date", how="left")

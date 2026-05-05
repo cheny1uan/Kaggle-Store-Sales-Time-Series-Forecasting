@@ -93,18 +93,20 @@ def add_lag_rolling_features(
     windows = windows or [7, 28]
 
     target = df.copy()
+    if value_col not in target.columns:
+        target[value_col] = 0.0
     target["_is_target"] = 1
     target["_order"] = np.arange(len(target))
+    base_cols = list(dict.fromkeys(group_cols + ["date", value_col]))
 
     if history_df is None:
-        work = target.copy()
+        work = target[base_cols + ["_is_target", "_order"]].copy()
     else:
-        needed_cols = list(dict.fromkeys(group_cols + ["date", value_col]))
-        available_cols = [c for c in needed_cols if c in history_df.columns]
+        available_cols = [c for c in base_cols if c in history_df.columns]
         history = history_df[available_cols].copy()
         history["_is_target"] = 0
         history["_order"] = -1
-        work = pd.concat([history, target], ignore_index=True, sort=False)
+        work = pd.concat([history, target[base_cols + ["_is_target", "_order"]]], ignore_index=True, sort=False)
 
     work["date"] = pd.to_datetime(work["date"])
     work = work.sort_values(group_cols + ["date", "_order"]).reset_index(drop=True)
@@ -128,7 +130,11 @@ def add_lag_rolling_features(
     ]
     work[feat_cols] = work[feat_cols].fillna(-1)
 
-    if history_df is None:
-        return work.sort_values("_order").drop(columns=["_is_target", "_order"])
+    target_feats = work[work["_is_target"] == 1][["_order"] + feat_cols].sort_values("_order")
+    target_out = target.sort_values("_order").merge(target_feats, on="_order", how="left")
+    target_out = target_out.drop(columns=["_is_target", "_order"])
 
-    return work[work["_is_target"] == 1].sort_values("_order").drop(columns=["_is_target", "_order"])
+    if history_df is None:
+        return target_out
+
+    return target_out
