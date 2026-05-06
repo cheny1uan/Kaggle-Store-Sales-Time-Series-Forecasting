@@ -51,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient-clip-val", type=float, default=0.1)
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--output-dir", type=str, default=str(SRC_TFT_DIR / "checkpoints"))
+    parser.add_argument("--ckpt-path", type=str, default=None, help="Path to checkpoint for resuming training")
     return parser.parse_args()
 
 
@@ -141,6 +142,7 @@ def main() -> None:
         model,
         train_dataloaders=dataloaders.train_dataloader,
         val_dataloaders=dataloaders.val_dataloader,
+        ckpt_path=args.ckpt_path,
     )
 
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
