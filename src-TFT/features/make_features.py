@@ -42,7 +42,49 @@ KNOWN_FUTURE_COLUMNS = [
 ]
 # 历史观测特征：训练期可观测，但进入未来预测期后不能直接提前知道。
 PAST_OBSERVED_COLUMNS = ["sales", "transactions", "dcoilwtico"]
-BASELINE_EXPORT_COLUMNS = ["id", "date", *STATIC_COLUMNS, *KNOWN_FUTURE_COLUMNS, *PAST_OBSERVED_COLUMNS]
+# 目标历史特征：由 sales 的历史值生成，预测期深处不可用的位置会使用 sentinel 填充。
+SALES_LAG_ROLLING_COLUMNS = [
+    "sales_lag_1",
+    "sales_lag_7",
+    "sales_lag_14",
+    "sales_lag_28",
+    "sales_roll_mean_7",
+    "sales_roll_mean_28",
+    "sales_roll_std_7",
+    "sales_roll_std_28",
+]
+# 目标聚合先验：只从历史训练集拟合，预测期按门店、品类和日历键查表得到。
+TARGET_AGGREGATE_COLUMNS = [
+    "store_nbr_sales_mean",
+    "store_nbr_sales_std",
+    "family_sales_mean",
+    "family_sales_std",
+    "store_nbr__family_sales_mean",
+    "store_nbr__family_sales_std",
+    "family__dayofweek_sales_mean",
+    "family__dayofweek_sales_std",
+    "store_nbr__dayofweek_sales_mean",
+    "store_nbr__dayofweek_sales_std",
+    "type_sales_mean",
+    "type_sales_std",
+    "city_sales_mean",
+    "city_sales_std",
+    "state_sales_mean",
+    "state_sales_std",
+    "family__month_sales_mean",
+    "family__month_sales_std",
+    "store_nbr__month_sales_mean",
+    "store_nbr__month_sales_std",
+]
+BASELINE_EXPORT_COLUMNS = [
+    "id",
+    "date",
+    *STATIC_COLUMNS,
+    *KNOWN_FUTURE_COLUMNS,
+    *TARGET_AGGREGATE_COLUMNS,
+    *PAST_OBSERVED_COLUMNS,
+    *SALES_LAG_ROLLING_COLUMNS,
+]
 
 
 def add_date_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -120,6 +162,28 @@ def apply_target_aggregates(df: pd.DataFrame, mappings: dict[str, pd.DataFrame])
     return out
 
 
+def build_aggregate_fallbacks(train_df: pd.DataFrame) -> dict[str, float]:
+    """构造目标聚合特征缺失时使用的全局回退值。"""
+    global_mean = float(train_df["sales"].mean())
+    global_std = float(train_df["sales"].std())
+    if np.isnan(global_std):
+        global_std = 0.0
+
+    fallbacks: dict[str, float] = {}
+    for col in TARGET_AGGREGATE_COLUMNS:
+        fallbacks[col] = global_std if col.endswith("_sales_std") else global_mean
+    return fallbacks
+
+
+def fill_target_aggregate_columns(df: pd.DataFrame, fallbacks: dict[str, float]) -> pd.DataFrame:
+    """填充目标聚合先验里的缺失值，避免后续 dataset 构造遇到 NaN。"""
+    out = df.copy()
+    for col in TARGET_AGGREGATE_COLUMNS:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(fallbacks[col])
+    return out
+
+
 def add_lag_rolling_features(
     df: pd.DataFrame,
     history_df: pd.DataFrame | None = None,
@@ -140,14 +204,15 @@ def add_lag_rolling_features(
     windows = windows or [7, 28]
 
     target = df.copy()
+    if value_col not in target.columns:
+        target[value_col] = np.nan
     target["_is_target"] = 1
     target["_order"] = np.arange(len(target))
 
     if history_df is None:
         work = target.copy()
     else:
-        needed_cols = list(dict.fromkeys(group_cols + ["date", value_col]))
-        available_cols = [c for c in needed_cols if c in history_df.columns]
+        available_cols = [c for c in target.columns if c in history_df.columns]
         history = history_df[available_cols].copy()
         history["_is_target"] = 0
         history["_order"] = -1
@@ -182,7 +247,13 @@ def add_lag_rolling_features(
     return work[work["_is_target"] == 1].sort_values("_order").drop(columns=["_is_target", "_order"])
 
 
-def build_tft_baseline_features(base_df: pd.DataFrame, frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+def build_tft_baseline_features(
+    base_df: pd.DataFrame,
+    frames: dict[str, pd.DataFrame],
+    target_agg_mappings: dict[str, pd.DataFrame] | None = None,
+    history_df: pd.DataFrame | None = None,
+    aggregate_fallbacks: dict[str, float] | None = None,
+) -> pd.DataFrame:
     """从主表和辅助表构造 TFT baseline 特征。
 
     该函数只保留当前 baseline 配置里明确需要的列，保证导出结果可直接进入
@@ -203,9 +274,20 @@ def build_tft_baseline_features(base_df: pd.DataFrame, frames: dict[str, pd.Data
     )
     out = add_date_features(out)
 
+    if target_agg_mappings is not None:
+        out = apply_target_aggregates(out, target_agg_mappings)
+        if aggregate_fallbacks is not None:
+            out = fill_target_aggregate_columns(out, aggregate_fallbacks)
+
+    out = add_lag_rolling_features(out, history_df=history_df, value_col="sales", feature_prefix="sales")
+
     for col in BASELINE_EXPORT_COLUMNS:
         if col not in out.columns:
             out[col] = np.nan
+
+    if aggregate_fallbacks is not None:
+        out = fill_target_aggregate_columns(out, aggregate_fallbacks)
+    out[SALES_LAG_ROLLING_COLUMNS] = out[SALES_LAG_ROLLING_COLUMNS].apply(pd.to_numeric, errors="coerce").fillna(-1)
 
     return out[BASELINE_EXPORT_COLUMNS].copy()
 
@@ -223,8 +305,23 @@ def main() -> None:
     output_dir = Path(__file__).resolve().parent
 
     frames = load_raw_data(data_dir)
-    train_features = build_tft_baseline_features(frames["train"], frames)
-    test_features = build_tft_baseline_features(frames["test"], frames)
+    train_base = build_tft_baseline_features(frames["train"], frames)
+    target_agg_mappings = build_target_aggregates(train_base)
+    aggregate_fallbacks = build_aggregate_fallbacks(train_base)
+
+    train_features = build_tft_baseline_features(
+        frames["train"],
+        frames,
+        target_agg_mappings=target_agg_mappings,
+        aggregate_fallbacks=aggregate_fallbacks,
+    )
+    test_features = build_tft_baseline_features(
+        frames["test"],
+        frames,
+        target_agg_mappings=target_agg_mappings,
+        history_df=train_base,
+        aggregate_fallbacks=aggregate_fallbacks,
+    )
 
     train_path = output_dir / "train_tft_baseline_features.csv"
     test_path = output_dir / "test_tft_baseline_features.csv"

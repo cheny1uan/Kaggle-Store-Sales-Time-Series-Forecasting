@@ -33,6 +33,40 @@ TIME_VARYING_KNOWN_CATEGORICALS = [
     "weekofyear",
     "quarter",
 ]
+# 目标聚合先验：从历史训练集拟合，预测期可按已知的门店、品类和日历键查表得到。
+TARGET_AGGREGATE_REALS = [
+    "store_nbr_sales_mean",
+    "store_nbr_sales_std",
+    "family_sales_mean",
+    "family_sales_std",
+    "store_nbr__family_sales_mean",
+    "store_nbr__family_sales_std",
+    "family__dayofweek_sales_mean",
+    "family__dayofweek_sales_std",
+    "store_nbr__dayofweek_sales_mean",
+    "store_nbr__dayofweek_sales_std",
+    "type_sales_mean",
+    "type_sales_std",
+    "city_sales_mean",
+    "city_sales_std",
+    "state_sales_mean",
+    "state_sales_std",
+    "family__month_sales_mean",
+    "family__month_sales_std",
+    "store_nbr__month_sales_mean",
+    "store_nbr__month_sales_std",
+]
+# sales 历史 lag / rolling 特征：训练期由真实历史生成，预测期不可用部分使用 sentinel。
+SALES_LAG_ROLLING_REALS = [
+    "sales_lag_1",
+    "sales_lag_7",
+    "sales_lag_14",
+    "sales_lag_28",
+    "sales_roll_mean_7",
+    "sales_roll_mean_28",
+    "sales_roll_std_7",
+    "sales_roll_std_28",
+]
 # 已知未来实数特征：预测期仍可显式提供给模型的数值变量。
 TIME_VARYING_KNOWN_REALS = [
     TIME_IDX,
@@ -48,10 +82,11 @@ TIME_VARYING_KNOWN_REALS = [
     "doy_cos",
     "holiday_flag",
     "event_flag",
+    *TARGET_AGGREGATE_REALS,
 ]
 TIME_VARYING_UNKNOWN_CATEGORICALS: list[str] = []
 # 历史观测实数特征：训练期可以看到，进入未来预测期后无法直接提前知道。
-TIME_VARYING_UNKNOWN_REALS = [TARGET, "transactions", "dcoilwtico"]
+TIME_VARYING_UNKNOWN_REALS = [TARGET, "transactions", "dcoilwtico", *SALES_LAG_ROLLING_REALS]
 
 # 用于进入 TimeSeriesDataSet 前统一做 dtype 规范化的列集合。
 CATEGORICAL_COLUMNS = [*GROUP_IDS, "city", "state", "store_type", "cluster", *TIME_VARYING_KNOWN_CATEGORICALS]
@@ -83,9 +118,11 @@ BASELINE_COLUMNS = [
     "doy_cos",
     "holiday_flag",
     "event_flag",
+    *TARGET_AGGREGATE_REALS,
     TARGET,
     "transactions",
     "dcoilwtico",
+    *SALES_LAG_ROLLING_REALS,
 ]
 
 
