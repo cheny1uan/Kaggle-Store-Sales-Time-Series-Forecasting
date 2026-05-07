@@ -42,6 +42,19 @@ def build_tft_model(
     )
 
 
-def load_tft_from_checkpoint(checkpoint_path: str | Path) -> TemporalFusionTransformer:
-    """从 checkpoint 恢复训练好的 TFT 模型。"""
-    return TemporalFusionTransformer.load_from_checkpoint(str(checkpoint_path))
+def load_tft_from_checkpoint(
+    checkpoint_path: str | Path,
+    learning_rate: float | None = None,
+    reduce_on_plateau_patience: int | None = None,
+) -> TemporalFusionTransformer:
+    """从 checkpoint 恢复训练好的 TFT 模型。
+
+    这里支持覆盖学习率等训练超参数，便于把已有 best checkpoint 作为权重初始化，
+    再在新的训练集或新的训练轮次上继续训练。
+    """
+    load_kwargs = {}
+    if learning_rate is not None:
+        load_kwargs["learning_rate"] = learning_rate
+    if reduce_on_plateau_patience is not None:
+        load_kwargs["reduce_on_plateau_patience"] = reduce_on_plateau_patience
+    return TemporalFusionTransformer.load_from_checkpoint(str(checkpoint_path), **load_kwargs)

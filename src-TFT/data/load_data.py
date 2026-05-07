@@ -35,17 +35,38 @@ def load_raw_data(data_dir: str | Path) -> dict[str, pd.DataFrame]:
     return frames
 
 
-def build_holiday_features(holidays: pd.DataFrame) -> pd.DataFrame:
-    """把原始节假日表压缩为按日期聚合的 holiday/event 标记。"""
+def build_holiday_features(holidays: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
+    """按节假日 locale 作用范围构造 store 级 holiday/event 标记。"""
     df = holidays.copy()
     df["date"] = pd.to_datetime(df["date"])
-    df["is_holiday"] = ((df["type"] == "Holiday") & (~df["transferred"].astype(bool))).astype("int8")
-    df["is_event"] = (df["type"] == "Event").astype("int8")
-    grouped = df.groupby("date", as_index=False).agg(
-        holiday_flag=("is_holiday", "max"),
-        event_flag=("is_event", "max"),
+    transferred = df["transferred"].astype(bool)
+    holiday_like_types = {"Holiday", "Additional", "Bridge", "Transfer"}
+    df["holiday_flag"] = (df["type"].isin(holiday_like_types) & ~((df["type"] == "Holiday") & transferred)).astype("int8")
+    df["event_flag"] = (df["type"] == "Event").astype("int8")
+    df = df[(df["holiday_flag"] == 1) | (df["event_flag"] == 1)].copy()
+
+    store_lookup = stores[["store_nbr", "city", "state"]].copy()
+    national = df[df["locale"] == "National"].merge(store_lookup[["store_nbr"]], how="cross")
+    regional = df[df["locale"] == "Regional"].merge(
+        store_lookup[["store_nbr", "state"]],
+        left_on="locale_name",
+        right_on="state",
+        how="inner",
     )
-    return grouped
+    local = df[df["locale"] == "Local"].merge(
+        store_lookup[["store_nbr", "city"]],
+        left_on="locale_name",
+        right_on="city",
+        how="inner",
+    )
+    expanded = pd.concat([national, regional, local], ignore_index=True, sort=False)
+    if expanded.empty:
+        return pd.DataFrame(columns=["date", "store_nbr", "holiday_flag", "event_flag"])
+
+    return expanded.groupby(["date", "store_nbr"], as_index=False).agg(
+        holiday_flag=("holiday_flag", "max"),
+        event_flag=("event_flag", "max"),
+    )
 
 
 def build_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
@@ -78,11 +99,11 @@ def merge_features(
     out["date"] = pd.to_datetime(out["date"])
     stores = stores.copy()
     oil = build_oil_features(oil)
-    holidays = build_holiday_features(holidays)
+    holidays = build_holiday_features(holidays, stores)
     transactions = build_transaction_features(transactions)
     out = out.merge(stores, on="store_nbr", how="left")
     out = out.merge(oil, on="date", how="left")
-    out = out.merge(holidays, on="date", how="left")
+    out = out.merge(holidays, on=["date", "store_nbr"], how="left")
     out = out.merge(transactions, on=["date", "store_nbr"], how="left")
     # 没有命中节假日/事件/交易量记录时，按“无事件、无记录即 0”处理。
     out["holiday_flag"] = out["holiday_flag"].fillna(0).astype("int8")
