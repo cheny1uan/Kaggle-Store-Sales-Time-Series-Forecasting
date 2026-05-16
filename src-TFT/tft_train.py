@@ -25,7 +25,7 @@ if str(SRC_TFT_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_TFT_DIR))
 
 from data.tft_dataloaders import build_tft_dataloaders, load_baseline_feature_frames
-from models.tft_model import build_tft_model
+from models.tft_model import build_tft_model, load_tft_from_checkpoint
 from utils.tft_config import TFTDatasetConfig
 
 
@@ -127,22 +127,29 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
     )
-    model = build_tft_model(
-        dataloaders.training,
-        learning_rate=args.learning_rate,
-        hidden_size=args.hidden_size,
-        attention_head_size=args.attention_head_size,
-        dropout=args.dropout,
-        hidden_continuous_size=args.hidden_continuous_size,
-        lstm_layers=args.lstm_layers,
-        reduce_on_plateau_patience=max(1, args.early_stopping_patience // 2),
-    )
+    reduce_on_plateau_patience = max(1, args.early_stopping_patience // 2)
+    if args.ckpt_path:
+        model = load_tft_from_checkpoint(
+            args.ckpt_path,
+            learning_rate=args.learning_rate,
+            reduce_on_plateau_patience=reduce_on_plateau_patience,
+        )
+    else:
+        model = build_tft_model(
+            dataloaders.training,
+            learning_rate=args.learning_rate,
+            hidden_size=args.hidden_size,
+            attention_head_size=args.attention_head_size,
+            dropout=args.dropout,
+            hidden_continuous_size=args.hidden_continuous_size,
+            lstm_layers=args.lstm_layers,
+            reduce_on_plateau_patience=reduce_on_plateau_patience,
+        )
     trainer, checkpoint_callback = build_trainer(args)
     trainer.fit(
         model,
         train_dataloaders=dataloaders.train_dataloader,
         val_dataloaders=dataloaders.val_dataloader,
-        ckpt_path=args.ckpt_path,
     )
 
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
